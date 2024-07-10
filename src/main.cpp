@@ -10,6 +10,7 @@
 #include <addons/RTDBHelper.h>
 
 #include <DHT.h>
+#include <time.h>
 
 // DHT11 sensor pin & type
 #define DHTPIN 25 
@@ -37,18 +38,28 @@ FirebaseConfig config;
 // Variable to save USER UID
 String uid;
 
-// Variables to save database paths
+// Database main path (to be updated in setup with the user UID)
 String databasePath;
-String tempPath;
-String humPath;
-String presPath;
+
+// Database child nodes
+String tempPath = "/temperature";
+String humPath = "/humidity";
+String timePath = "/timestamp";
+
+// Parent Node (to be updated in every loop)
+String parentPath;
+
+int timestamp;
+FirebaseJson json;
+
+const char* ntpServer = "pool.ntp.org";
 
 // DHT11 sensor configuration
 DHT dht(DHTPIN, DHTTYPE);
 
 // Timer variables (send new readings every fifteen seconds)
 unsigned long sendDataPrevMillis = 0;
-unsigned long timerDelay = 15000;
+unsigned long timerDelay = 30000;
 
 // Setting up WIFI
 void setupWiFi() {
@@ -90,31 +101,43 @@ void setupFirebase() {
   // Update database path
   databasePath = "/users/";
   databasePath += uid;
+  databasePath += "/data/";
 
   // Update database path for sensor readings
-  humPath = databasePath;
-  humPath += "/data/humidity"; // --> users/<user_uid>/data/humidity
+  // humPath = databasePath;
+  // humPath += "/data/humidity"; // --> users/<user_uid>/data/humidity
 
-  tempPath = databasePath;
-  tempPath += "/data/temperature"; // --> users/<user_uid>/data/temperature
+  // tempPath = databasePath;
+  // tempPath += "/data/temperature"; // --> users/<user_uid>/data/temperature
 
   fbdo.setResponseSize(2048);
   Firebase.RTDB.setReadTimeout(&fbdo, 1000 * 30);
   Firebase.RTDB.setwriteSizeLimit(&fbdo, "tiny");
 }
 
-void pushData(String path, float value) {
-  if (Firebase.RTDB.setInt(&fbdo, path.c_str(), value)) {
-    Serial.println("PASSED");
-    Serial.print("PATH: ");
-    Serial.println(fbdo.dataPath());
-    Serial.print("TYPE: ");
-    Serial.println(fbdo.dataType());
-  } else {
-    Serial.println("FAILED");
-    Serial.print("REASON: ");
-    Serial.println(fbdo.errorReason());
+// void pushData(String path, float value) {
+//   if (Firebase.RTDB.setInt(&fbdo, path.c_str(), value)) {
+//     Serial.println("PASSED");
+//     Serial.print("PATH: ");
+//     Serial.println(fbdo.dataPath());
+//     Serial.print("TYPE: ");
+//     Serial.println(fbdo.dataType());
+//   } else {
+//     Serial.println("FAILED");
+//     Serial.print("REASON: ");
+//     Serial.println(fbdo.errorReason());
+//   }
+// }
+
+unsigned long getTime() {
+  time_t now;
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    //Serial.println("Failed to obtain time");
+    return(0);
   }
+  time(&now);
+  return now;
 }
 
 void setup() {
@@ -122,6 +145,7 @@ void setup() {
   dht.begin();
   setupWiFi();
   setupFirebase();
+  configTime(0, 0, ntpServer);
 
   pinMode(2, OUTPUT);
 }
@@ -151,7 +175,22 @@ void loop() {
       return;
     }
 
-    pushData(tempPath, temperature);
-    pushData(humPath, humidity);
+    // pushData(tempPath, temperature);
+    // pushData(humPath, humidity);
+
+    //Get current timestamp
+    timestamp = getTime();
+    Serial.print ("time: ");
+    Serial.println (timestamp);
+
+    
+    parentPath = databasePath;
+    parentPath += String(timestamp);
+
+    json.set(tempPath.c_str(), String(temperature));
+    json.set(humPath.c_str(), String(humidity));
+    json.set(timePath, String(timestamp));
+    Serial.printf("Set json... %s\n", Firebase.RTDB.setJSON(&fbdo, parentPath.c_str(), &json) ? "ok" : fbdo.errorReason().c_str());
+  
   }
 }
